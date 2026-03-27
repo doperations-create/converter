@@ -1,0 +1,5 @@
+flask
+pillow
+python-docx
+PyPDF2
+reportlab
