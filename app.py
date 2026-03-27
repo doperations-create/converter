@@ -1,7 +1,7 @@
 from flask import Flask, request, send_file
 from PIL import Image
 from docx import Document
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader, PdfMerger, PdfWriter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import os
@@ -12,12 +12,12 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Helper for unique filenames (IMPORTANT)
+# Helper for unique filenames
 def unique_path(filename):
     name, ext = os.path.splitext(filename)
     return os.path.join(UPLOAD_FOLDER, f"{name}_{int(time.time()*1000)}{ext}")
 
-# 🌈 HOME PAGE (MULTI + NEON ONLY ADDED)
+# 🌈 HOME PAGE
 @app.route('/')
 def home():
     return '''
@@ -47,8 +47,6 @@ def home():
                 width: 90%;
                 max-width: 400px;
                 border-radius: 15px;
-
-                /* 🌈 AUTO NEON */
                 animation: neonGlow 3s infinite alternate;
             }
 
@@ -77,6 +75,8 @@ def home():
     <body>
 
     <h1>🔥 File Converter Tool</h1>
+
+    <!-- EXISTING BOXES (UNCHANGED) -->
 
     <div class="box">
         <h3>Convert Image</h3>
@@ -153,6 +153,32 @@ def home():
         </form>
     </div>
 
+    <!-- NEW FEATURES -->
+
+    <div class="box">
+        <h3>PDF Merger</h3>
+        <form action="/merge/pdf" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" multiple><br>
+            <button>Merge</button>
+        </form>
+    </div>
+
+    <div class="box">
+        <h3>PDF Splitter</h3>
+        <form action="/split/pdf" method="post" enctype="multipart/form-data">
+            <input type="file" name="file"><br>
+            <button>Split</button>
+        </form>
+    </div>
+
+    <div class="box">
+        <h3>Images → Single PDF</h3>
+        <form action="/convert/images-to-single-pdf" method="post" enctype="multipart/form-data">
+            <input type="file" name="file" multiple><br>
+            <button>Convert</button>
+        </form>
+    </div>
+
     </body>
     </html>
     '''
@@ -173,11 +199,9 @@ def convert_image():
         Image.open(path).save(out)
         outputs.append(out)
 
-    # If single → send directly
     if len(outputs) == 1:
         return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
 
-    # If multiple → ZIP
     zip_path = os.path.join(UPLOAD_FOLDER, f"converted_{int(time.time())}.zip")
     with zipfile.ZipFile(zip_path, 'w') as z:
         for f in outputs:
@@ -371,6 +395,68 @@ def zip_file():
 
     return send_file(zip_path, as_attachment=True, download_name="files.zip")
 
-# 🔥 RUN
+# ---------------- NEW: PDF MERGE ----------------
+@app.route('/merge/pdf', methods=['POST'])
+def merge_pdf():
+    files = request.files.getlist('file')
+    merger = PdfMerger()
+
+    for file in files:
+        path = unique_path(file.filename)
+        file.save(path)
+        merger.append(path)
+
+    out = os.path.join(UPLOAD_FOLDER, f"merged_{int(time.time())}.pdf")
+    merger.write(out)
+    merger.close()
+
+    return send_file(out, as_attachment=True, download_name="merged.pdf")
+
+# ---------------- NEW: PDF SPLIT ----------------
+@app.route('/split/pdf', methods=['POST'])
+def split_pdf():
+    file = request.files['file']
+    path = unique_path(file.filename)
+    file.save(path)
+
+    reader = PdfReader(path)
+
+    zip_path = os.path.join(UPLOAD_FOLDER, f"split_{int(time.time())}.zip")
+
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for i, page in enumerate(reader.pages):
+            writer = PdfWriter()
+            writer.add_page(page)
+
+            out_path = os.path.join(UPLOAD_FOLDER, f"page_{i}.pdf")
+            with open(out_path, "wb") as f:
+                writer.write(f)
+
+            z.write(out_path, f"page_{i}.pdf")
+
+    return send_file(zip_path, as_attachment=True, download_name="split_pages.zip")
+
+# ---------------- NEW: IMAGES TO SINGLE PDF ----------------
+@app.route('/convert/images-to-single-pdf', methods=['POST'])
+def images_to_single_pdf():
+    files = request.files.getlist('file')
+
+    images = []
+
+    for file in files:
+        path = unique_path(file.filename)
+        file.save(path)
+
+        img = Image.open(path).convert("RGB")
+        images.append(img)
+
+    pdf_path = os.path.join(UPLOAD_FOLDER, f"combined_{int(time.time())}.pdf")
+
+    if images:
+        images[0].save(pdf_path, save_all=True, append_images=images[1:])
+
+    return send_file(pdf_path, as_attachment=True, download_name="combined.pdf")
+
+# ---------------- RUN ----------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
