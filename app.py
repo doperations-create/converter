@@ -1,9 +1,6 @@
 from flask import Flask, request, send_file
 from PIL import Image
-from docx import Document
-from PyPDF2 import PdfReader
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+from PyPDF2 import PdfReader, PdfWriter
 import os
 import zipfile
 
@@ -11,124 +8,75 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 🌈 BEAUTIFUL HOME PAGE
+# 🌈 NEON UI
 @app.route('/')
 def home():
     return '''
     <html>
     <head>
-        <title>File Converter</title>
+        <title>Neon File Tool</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {
                 font-family: Arial;
-                background: linear-gradient(135deg, #ff7e5f, #feb47b);
-                color: white;
+                background: black;
+                color: #0ff;
                 text-align: center;
-                padding: 10px;
             }
-            h1 { font-size: 28px; }
+            h1 {
+                text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+            }
             .box {
-                background: white;
-                color: black;
+                border: 1px solid #0ff;
                 padding: 15px;
-                margin: 10px auto;
+                margin: 15px auto;
                 width: 90%;
                 max-width: 400px;
-                border-radius: 15px;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+                border-radius: 10px;
+                box-shadow: 0 0 15px #0ff;
             }
             button {
-                background: #ff7e5f;
-                color: white;
-                border: none;
+                background: black;
+                color: #0ff;
+                border: 1px solid #0ff;
                 padding: 10px;
-                border-radius: 8px;
                 width: 100%;
-            }
-            select, input {
-                width: 90%;
-                padding: 5px;
                 margin-top: 5px;
+            }
+            input, select {
+                width: 90%;
+                margin: 5px;
+                background: black;
+                color: #0ff;
+                border: 1px solid #0ff;
             }
         </style>
     </head>
     <body>
 
-    <h1>🔥 File Converter Tool</h1>
+    <h1>⚡ Neon File Converter ⚡</h1>
 
     <div class="box">
-        <h3>Convert Image</h3>
-        <form action="/convert/image" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
-            <select name="format">
-                <option value="png">PNG</option>
-                <option value="webp">WEBP</option>
-            </select><br>
-            <button>Convert</button>
+        <h3>Images → ONE PDF</h3>
+        <form action="/multi/image-to-one-pdf" method="post" enctype="multipart/form-data">
+            <input type="file" name="files" multiple><br>
+            <button>Create PDF</button>
         </form>
     </div>
 
     <div class="box">
-        <h3>Image → PDF</h3>
-        <form action="/convert/image-to-pdf" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
-            <button>Convert</button>
+        <h3>Merge PDFs</h3>
+        <form action="/multi/pdf-merge" method="post" enctype="multipart/form-data">
+            <input type="file" name="files" multiple><br>
+            <button>Merge PDFs</button>
         </form>
     </div>
 
     <div class="box">
-        <h3>Word → PDF</h3>
-        <form action="/convert/word-to-pdf" method="post" enctype="multipart/form-data">
+        <h3>PDF → Images (ZIP)</h3>
+        <form action="/multi/pdf-to-images" method="post" enctype="multipart/form-data">
             <input type="file" name="file"><br>
             <button>Convert</button>
-        </form>
-    </div>
-
-    <div class="box">
-        <h3>Compress Image</h3>
-        <form action="/compress/image" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
-            <select name="level">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-            </select><br>
-            <button>Compress</button>
-        </form>
-    </div>
-
-    <div class="box">
-        <h3>Resize Image</h3>
-        <form action="/resize/image" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
-            Width:<input type="number" name="width">
-            Height:<input type="number" name="height">
-            <button>Resize</button>
-        </form>
-    </div>
-
-    <div class="box">
-        <h3>PDF → Text</h3>
-        <form action="/convert/pdf-to-txt" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
-            <button>Convert</button>
-        </form>
-    </div>
-
-    <div class="box">
-        <h3>Word → Text</h3>
-        <form action="/convert/word-to-txt" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
-            <button>Convert</button>
-        </form>
-    </div>
-
-    <div class="box">
-        <h3>ZIP File</h3>
-        <form action="/compress/zip" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
-            <button>Zip</button>
         </form>
     </div>
 
@@ -136,104 +84,64 @@ def home():
     </html>
     '''
 
-# ---------------- IMAGE CONVERT ----------------
-@app.route('/convert/image', methods=['POST'])
-def convert_image():
-    file = request.files['file']
-    fmt = request.form.get('format', 'png')
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path.split('.')[0] + "." + fmt
-    file.save(path)
-    Image.open(path).save(out)
-    return send_file(out, as_attachment=True)
+# ---------------- MULTI IMAGE → ONE PDF ----------------
+@app.route('/multi/image-to-one-pdf', methods=['POST'])
+def images_to_pdf():
+    files = request.files.getlist('files')
 
-# ---------------- IMAGE TO PDF ----------------
-@app.route('/convert/image-to-pdf', methods=['POST'])
-def image_to_pdf():
-    file = request.files['file']
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path + ".pdf"
-    file.save(path)
-    Image.open(path).convert('RGB').save(out)
-    return send_file(out, as_attachment=True)
+    images = []
+    for file in files:
+        path = os.path.join(UPLOAD_FOLDER, file.filename)
+        file.save(path)
+        img = Image.open(path).convert('RGB')
+        images.append(img)
 
-# ---------------- WORD TO PDF ----------------
-@app.route('/convert/word-to-pdf', methods=['POST'])
-def word_to_pdf():
-    file = request.files['file']
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path + ".pdf"
-    file.save(path)
+    output_path = os.path.join(UPLOAD_FOLDER, "combined.pdf")
 
-    doc = Document(path)
-    c = canvas.Canvas(out, pagesize=letter)
+    images[0].save(output_path, save_all=True, append_images=images[1:])
 
-    y = 750
-    for para in doc.paragraphs:
-        c.drawString(40, y, para.text)
-        y -= 20
+    return send_file(output_path, as_attachment=True)
 
-    c.save()
-    return send_file(out, as_attachment=True)
+# ---------------- MERGE PDF ----------------
+@app.route('/multi/pdf-merge', methods=['POST'])
+def merge_pdf():
+    files = request.files.getlist('files')
+    writer = PdfWriter()
 
-# ---------------- IMAGE COMPRESS ----------------
-@app.route('/compress/image', methods=['POST'])
-def compress_image():
-    file = request.files['file']
-    level = request.form.get('level', 'medium')
-    quality = {"low":20,"medium":50,"high":80}[level]
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path+"_compressed.jpg"
-    file.save(path)
-    Image.open(path).save(out, optimize=True, quality=quality)
-    return send_file(out, as_attachment=True)
+    for file in files:
+        path = os.path.join(UPLOAD_FOLDER, file.filename)
+        file.save(path)
 
-# ---------------- IMAGE RESIZE ----------------
-@app.route('/resize/image', methods=['POST'])
-def resize_image():
-    file = request.files['file']
-    w = int(request.form.get('width',200))
-    h = int(request.form.get('height',200))
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path+"_resized.jpg"
-    file.save(path)
-    Image.open(path).resize((w,h)).save(out)
-    return send_file(out, as_attachment=True)
+        reader = PdfReader(path)
+        for page in reader.pages:
+            writer.add_page(page)
 
-# ---------------- PDF TO TXT ----------------
-@app.route('/convert/pdf-to-txt', methods=['POST'])
-def pdf_to_txt():
+    output_path = os.path.join(UPLOAD_FOLDER, "merged.pdf")
+    with open(output_path, "wb") as f:
+        writer.write(f)
+
+    return send_file(output_path, as_attachment=True)
+
+# ---------------- PDF → IMAGES ZIP ----------------
+@app.route('/multi/pdf-to-images', methods=['POST'])
+def pdf_to_images():
+    from pdf2image import convert_from_path
+
     file = request.files['file']
     path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path+".txt"
     file.save(path)
-    reader = PdfReader(path)
-    text = "".join([p.extract_text() or "" for p in reader.pages])
-    open(out,"w").write(text)
-    return send_file(out, as_attachment=True)
 
-# ---------------- WORD TO TXT ----------------
-@app.route('/convert/word-to-txt', methods=['POST'])
-def word_to_txt():
-    file = request.files['file']
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path+".txt"
-    file.save(path)
-    doc = Document(path)
-    open(out,"w").write("\n".join([p.text for p in doc.paragraphs]))
-    return send_file(out, as_attachment=True)
+    images = convert_from_path(path)
 
-# ---------------- ZIP ----------------
-@app.route('/compress/zip', methods=['POST'])
-def zip_file():
-    file = request.files['file']
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    out = path+".zip"
-    file.save(path)
-    with zipfile.ZipFile(out,'w') as z:
-        z.write(path)
-    return send_file(out, as_attachment=True)
+    zip_path = os.path.join(UPLOAD_FOLDER, "pdf_images.zip")
 
-# 🔥 IMPORTANT: allow network access
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for i, img in enumerate(images):
+            img_path = os.path.join(UPLOAD_FOLDER, f"page_{i}.jpg")
+            img.save(img_path)
+            z.write(img_path, os.path.basename(img_path))
+
+    return send_file(zip_path, as_attachment=True)
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
