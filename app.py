@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, after_this_request
+from flask import Flask, request, send_file
 from PIL import Image
 from docx import Document
 from PyPDF2 import PdfReader
@@ -12,12 +12,12 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Helper: unique filename to avoid overwrite (IMPORTANT FIX)
+# Helper for unique filenames (IMPORTANT)
 def unique_path(filename):
     name, ext = os.path.splitext(filename)
-    return os.path.join(UPLOAD_FOLDER, f"{name}_{int(time.time())}{ext}")
+    return os.path.join(UPLOAD_FOLDER, f"{name}_{int(time.time()*1000)}{ext}")
 
-# 🌈 BEAUTIFUL HOME PAGE (ONLY NEON ADDED, NO LAYOUT CHANGE)
+# 🌈 HOME PAGE (MULTI + NEON ONLY ADDED)
 @app.route('/')
 def home():
     return '''
@@ -47,13 +47,15 @@ def home():
                 width: 90%;
                 max-width: 400px;
                 border-radius: 15px;
-                box-shadow: 0 0 10px #ff7e5f, 0 0 20px #feb47b;
-                animation: neonGlow 2s infinite alternate;
+
+                /* 🌈 AUTO NEON */
+                animation: neonGlow 3s infinite alternate;
             }
 
             @keyframes neonGlow {
-                from { box-shadow: 0 0 10px #ff7e5f; }
-                to { box-shadow: 0 0 25px #feb47b, 0 0 40px #ff7e5f; }
+                0% { box-shadow: 0 0 10px #ff7e5f; }
+                50% { box-shadow: 0 0 25px #feb47b; }
+                100% { box-shadow: 0 0 40px #ff7e5f; }
             }
 
             button {
@@ -79,7 +81,7 @@ def home():
     <div class="box">
         <h3>Convert Image</h3>
         <form action="/convert/image" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             <select name="format">
                 <option value="png">PNG</option>
                 <option value="webp">WEBP</option>
@@ -91,7 +93,7 @@ def home():
     <div class="box">
         <h3>Image → PDF</h3>
         <form action="/convert/image-to-pdf" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             <button>Convert</button>
         </form>
     </div>
@@ -99,7 +101,7 @@ def home():
     <div class="box">
         <h3>Word → PDF</h3>
         <form action="/convert/word-to-pdf" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             <button>Convert</button>
         </form>
     </div>
@@ -107,7 +109,7 @@ def home():
     <div class="box">
         <h3>Compress Image</h3>
         <form action="/compress/image" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             <select name="level">
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -120,7 +122,7 @@ def home():
     <div class="box">
         <h3>Resize Image</h3>
         <form action="/resize/image" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             Width:<input type="number" name="width">
             Height:<input type="number" name="height">
             <button>Resize</button>
@@ -130,7 +132,7 @@ def home():
     <div class="box">
         <h3>PDF → Text</h3>
         <form action="/convert/pdf-to-txt" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             <button>Convert</button>
         </form>
     </div>
@@ -138,7 +140,7 @@ def home():
     <div class="box">
         <h3>Word → Text</h3>
         <form action="/convert/word-to-txt" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             <button>Convert</button>
         </form>
     </div>
@@ -146,7 +148,7 @@ def home():
     <div class="box">
         <h3>ZIP File</h3>
         <form action="/compress/zip" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"><br>
+            <input type="file" name="file" multiple><br>
             <button>Zip</button>
         </form>
     </div>
@@ -155,132 +157,220 @@ def home():
     </html>
     '''
 
-# ---------------- FIXED: IMAGE CONVERT ----------------
+# ---------------- IMAGE CONVERT ----------------
 @app.route('/convert/image', methods=['POST'])
 def convert_image():
-    file = request.files['file']
+    files = request.files.getlist('file')
     fmt = request.form.get('format', 'png')
 
-    path = unique_path(file.filename)
-    out = path.rsplit('.', 1)[0] + "." + fmt
+    outputs = []
 
-    file.save(path)
-    Image.open(path).save(out)
+    for file in files:
+        path = unique_path(file.filename)
+        out = path.rsplit('.', 1)[0] + "." + fmt
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
+        file.save(path)
+        Image.open(path).save(out)
+        outputs.append(out)
 
-# ---------------- FIXED: IMAGE TO PDF ----------------
+    # If single → send directly
+    if len(outputs) == 1:
+        return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
+
+    # If multiple → ZIP
+    zip_path = os.path.join(UPLOAD_FOLDER, f"converted_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for f in outputs:
+            z.write(f, os.path.basename(f))
+
+    return send_file(zip_path, as_attachment=True, download_name="converted.zip")
+
+# ---------------- IMAGE TO PDF ----------------
 @app.route('/convert/image-to-pdf', methods=['POST'])
 def image_to_pdf():
-    file = request.files['file']
-    path = unique_path(file.filename)
-    out = path + ".pdf"
+    files = request.files.getlist('file')
 
-    file.save(path)
-    Image.open(path).convert('RGB').save(out)
+    outputs = []
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
+    for file in files:
+        path = unique_path(file.filename)
+        out = path + ".pdf"
 
-# ---------------- FIXED: WORD TO PDF ----------------
+        file.save(path)
+        Image.open(path).convert('RGB').save(out)
+        outputs.append(out)
+
+    if len(outputs) == 1:
+        return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
+
+    zip_path = os.path.join(UPLOAD_FOLDER, f"images_pdf_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for f in outputs:
+            z.write(f, os.path.basename(f))
+
+    return send_file(zip_path, as_attachment=True, download_name="images_pdf.zip")
+
+# ---------------- WORD TO PDF ----------------
 @app.route('/convert/word-to-pdf', methods=['POST'])
 def word_to_pdf():
-    file = request.files['file']
-    path = unique_path(file.filename)
-    out = path + ".pdf"
+    files = request.files.getlist('file')
+    outputs = []
 
-    file.save(path)
+    for file in files:
+        path = unique_path(file.filename)
+        out = path + ".pdf"
 
-    doc = Document(path)
-    c = canvas.Canvas(out, pagesize=letter)
+        file.save(path)
 
-    y = 750
-    for para in doc.paragraphs:
-        c.drawString(40, y, para.text)
-        y -= 20
+        doc = Document(path)
+        c = canvas.Canvas(out, pagesize=letter)
 
-    c.save()
+        y = 750
+        for para in doc.paragraphs:
+            c.drawString(40, y, para.text)
+            y -= 20
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
+        c.save()
+        outputs.append(out)
 
-# ---------------- FIXED: COMPRESS IMAGE ----------------
+    if len(outputs) == 1:
+        return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
+
+    zip_path = os.path.join(UPLOAD_FOLDER, f"word_pdf_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for f in outputs:
+            z.write(f, os.path.basename(f))
+
+    return send_file(zip_path, as_attachment=True, download_name="word_pdf.zip")
+
+# ---------------- IMAGE COMPRESS ----------------
 @app.route('/compress/image', methods=['POST'])
 def compress_image():
-    file = request.files['file']
+    files = request.files.getlist('file')
     level = request.form.get('level', 'medium')
 
-    quality = {"low": 20, "medium": 50, "high": 80}[level]
+    quality = {"low":20,"medium":50,"high":80}[level]
+    outputs = []
 
-    path = unique_path(file.filename)
-    out = path + "_compressed.jpg"
+    for file in files:
+        path = unique_path(file.filename)
+        out = path+"_compressed.jpg"
 
-    file.save(path)
-    Image.open(path).save(out, optimize=True, quality=quality)
+        file.save(path)
+        Image.open(path).save(out, optimize=True, quality=quality)
+        outputs.append(out)
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
+    if len(outputs) == 1:
+        return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
 
-# ---------------- FIXED: RESIZE IMAGE ----------------
+    zip_path = os.path.join(UPLOAD_FOLDER, f"compressed_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for f in outputs:
+            z.write(f, os.path.basename(f))
+
+    return send_file(zip_path, as_attachment=True, download_name="compressed.zip")
+
+# ---------------- RESIZE ----------------
 @app.route('/resize/image', methods=['POST'])
 def resize_image():
-    file = request.files['file']
-    w = int(request.form.get('width', 200))
-    h = int(request.form.get('height', 200))
+    files = request.files.getlist('file')
+    w = int(request.form.get('width',200))
+    h = int(request.form.get('height',200))
 
-    path = unique_path(file.filename)
-    out = path + "_resized.jpg"
+    outputs = []
 
-    file.save(path)
-    Image.open(path).resize((w, h)).save(out)
+    for file in files:
+        path = unique_path(file.filename)
+        out = path+"_resized.jpg"
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
+        file.save(path)
+        Image.open(path).resize((w,h)).save(out)
+        outputs.append(out)
 
-# ---------------- FIXED: PDF TO TXT ----------------
+    if len(outputs) == 1:
+        return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
+
+    zip_path = os.path.join(UPLOAD_FOLDER, f"resized_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for f in outputs:
+            z.write(f, os.path.basename(f))
+
+    return send_file(zip_path, as_attachment=True, download_name="resized.zip")
+
+# ---------------- PDF TO TXT ----------------
 @app.route('/convert/pdf-to-txt', methods=['POST'])
 def pdf_to_txt():
-    file = request.files['file']
-    path = unique_path(file.filename)
-    out = path + ".txt"
+    files = request.files.getlist('file')
+    outputs = []
 
-    file.save(path)
+    for file in files:
+        path = unique_path(file.filename)
+        out = path+".txt"
 
-    reader = PdfReader(path)
-    text = "".join([p.extract_text() or "" for p in reader.pages])
+        file.save(path)
 
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(text)
+        reader = PdfReader(path)
+        text = "".join([p.extract_text() or "" for p in reader.pages])
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(text)
 
-# ---------------- FIXED: WORD TO TXT ----------------
+        outputs.append(out)
+
+    if len(outputs) == 1:
+        return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
+
+    zip_path = os.path.join(UPLOAD_FOLDER, f"pdf_txt_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for f in outputs:
+            z.write(f, os.path.basename(f))
+
+    return send_file(zip_path, as_attachment=True, download_name="pdf_txt.zip")
+
+# ---------------- WORD TO TXT ----------------
 @app.route('/convert/word-to-txt', methods=['POST'])
 def word_to_txt():
-    file = request.files['file']
-    path = unique_path(file.filename)
-    out = path + ".txt"
+    files = request.files.getlist('file')
+    outputs = []
 
-    file.save(path)
+    for file in files:
+        path = unique_path(file.filename)
+        out = path+".txt"
 
-    doc = Document(path)
-    text = "\n".join([p.text for p in doc.paragraphs])
+        file.save(path)
 
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(text)
+        doc = Document(path)
+        text = "\n".join([p.text for p in doc.paragraphs])
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(text)
 
-# ---------------- FIXED: ZIP ----------------
+        outputs.append(out)
+
+    if len(outputs) == 1:
+        return send_file(outputs[0], as_attachment=True, download_name=os.path.basename(outputs[0]))
+
+    zip_path = os.path.join(UPLOAD_FOLDER, f"word_txt_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for f in outputs:
+            z.write(f, os.path.basename(f))
+
+    return send_file(zip_path, as_attachment=True, download_name="word_txt.zip")
+
+# ---------------- ZIP ----------------
 @app.route('/compress/zip', methods=['POST'])
 def zip_file():
-    file = request.files['file']
-    path = unique_path(file.filename)
-    out = path + ".zip"
+    files = request.files.getlist('file')
+    zip_path = os.path.join(UPLOAD_FOLDER, f"files_{int(time.time())}.zip")
 
-    file.save(path)
+    with zipfile.ZipFile(zip_path, 'w') as z:
+        for file in files:
+            path = unique_path(file.filename)
+            file.save(path)
+            z.write(path, os.path.basename(path))
 
-    with zipfile.ZipFile(out, 'w') as z:
-        z.write(path, os.path.basename(path))
+    return send_file(zip_path, as_attachment=True, download_name="files.zip")
 
-    return send_file(out, as_attachment=True, download_name=os.path.basename(out))
-
-# 🔥 IMPORTANT: allow network access
+# 🔥 RUN
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
